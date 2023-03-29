@@ -42,32 +42,33 @@ def read_and_process_data(input_filename):
     return data
 
 
-
 if __name__ == "__main__":
     # Input
-    for x in tqdm(sorted(os.listdir("./mxfold_inputs/"))):
-        if x.endswith(".csv"):
-            # system initialization
-            logical = False
-            df_results = np.array([])
-            num_procs = psutil.cpu_count(logical=logical)
-            if len(sys.argv) > 1:
-                num_procs = int(sys.argv[1])
+    for x in tqdm(
+        [i for i in sorted(os.listdir("./mxfold_inputs/")) if i.endswith(".csv")]
+    ):
 
-            big_df = read_and_process_data(x)
-            splitted_df = np.array_split(big_df, num_procs)
+        # system initialization
+        logical = False
+        df_results = np.array([])
+        num_procs = psutil.cpu_count(logical=logical)
+        if len(sys.argv) > 1:
+            num_procs = int(sys.argv[1])
 
-            with ProcessPoolExecutor(max_workers=num_procs) as executor:
-                rvals = [
-                    executor.submit(parallel_processing, df=df, i=i)
-                    for i, df in enumerate(splitted_df)
-                ]
-                for rval in as_completed(rvals):
-                    try:
-                        df_results = np.hstack(df_results, rval.result())
-                    except Exception as ex:
-                        print(str(ex))
-                        pass
+        big_df = read_and_process_data(x)
+        splitted_df = np.array_split(big_df, num_procs)
 
-            # Concatenate results
-            pd.DataFrame(df_results).to_csv(f"./mxfold_outputs/{x}_prediction.csv")
+        with ProcessPoolExecutor(max_workers=num_procs) as executor:
+            rvals = [
+                executor.submit(parallel_processing, df=df, i=i)
+                for i, df in enumerate(splitted_df)
+            ]
+            for rval in as_completed(rvals):
+                try:
+                    df_results = np.hstack((df_results, rval.result())).astype(str)
+                except Exception as ex:
+                    print(str(ex))
+                    pass
+
+        # Concatenate results
+        pd.DataFrame(df_results).to_csv(f"./mxfold_outputs/{x}_prediction.csv", index=False, header=False)
