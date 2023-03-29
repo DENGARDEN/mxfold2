@@ -164,3 +164,6 @@ experiments
 .DS_Store
 poetry.lock
 models
+
+mxfold_inputs/*
+mxfold_outputs/*
