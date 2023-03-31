@@ -1,6 +1,8 @@
 import os
 import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import dask.dataframe as dd
+import dask.array as da
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
@@ -16,14 +18,25 @@ def parallel_processing(df, i):
         filename = f"./mxfold_inputs/{x}_chunk_{i}.fasta"
         parse_data(df).to_csv(filename, index=False, header=False)
 
-        outputs = subprocess.run(
-            ["mxfold2", "predict", filename],
-            stdout=subprocess.PIPE,
-        ).stdout.splitlines()
+        with open(f"./mxfold_outputs/{x}_chunk_{i}.fa", "w") as f:
+            subprocess.run(
+                ["mxfold2", "predict", filename],
+                stdout=f,
+            )
 
+        df = (
+            pd.DataFrame(pd.read_csv(f"./mxfold_outputs/{x}_chunk_{i}.fa", header=None)[0]
+            .values
+            .astype(str)
+            .reshape([-1, 3])
+        )
+        )
+        df.columns = ["BC_order", "peGRNA sequenCe", "mxfold2_prediction"]
+        
         os.remove(filename)
+        os.remove(f"./mxfold_outputs/{x}_chunk_{i}.fa")
 
-        return np.array(outputs)
+        return df
 
     except KeyboardInterrupt as e:
         import sys
@@ -44,31 +57,37 @@ def read_and_process_data(input_filename):
 
 if __name__ == "__main__":
     # Input
-    for x in tqdm(
-        [i for i in sorted(os.listdir("./mxfold_inputs/")) if i.endswith(".csv")]
-    ):
+    for x in [i for i in sorted(os.listdir("./mxfold_inputs/")) if i.endswith(".csv")]:
 
         # system initialization
         logical = False
-        df_results = np.array([])
+        df_results = []
         num_procs = psutil.cpu_count(logical=logical)
         if len(sys.argv) > 1:
             num_procs = int(sys.argv[1])
 
         big_df = read_and_process_data(x)
-        splitted_df = np.array_split(big_df, num_procs)
+        splitted_df = np.array_split(big_df, num_procs // 8)
 
-        with ProcessPoolExecutor(max_workers=num_procs) as executor:
+        with ProcessPoolExecutor(
+            max_workers=len(splitted_df) if len(splitted_df) <= num_procs else num_procs
+        ) as executor:
             rvals = [
                 executor.submit(parallel_processing, df=df, i=i)
                 for i, df in enumerate(splitted_df)
             ]
             for rval in as_completed(rvals):
                 try:
-                    df_results = np.hstack((df_results, rval.result())).astype(str)
+                    df_results.append(rval.result()) 
+
                 except Exception as ex:
                     print(str(ex))
                     pass
 
         # Concatenate results
-        pd.DataFrame(df_results).to_csv(f"./mxfold_outputs/{x}_prediction.csv", index=False, header=False)
+        df = pd.DataFrame([], columns=["BC_order", "peGRNA sequenCe", "mxfold2_prediction"])
+        
+        for df_result in df_results:
+            df = pd.concat([df, df_result], axis=0  )
+        
+        df.to_csv(f"./mxfold_outputs/{x}_prediction.csv", index=False, header=True)
